@@ -116,21 +116,33 @@ API_KEY = "PKBED76LKCYK6SP01NU8"
 SECRET_KEY = "srZSLBgtsu0j5eKMH5KCWdm9QD0bu7w01xjHkRUH"
 BASE_URL = "https://paper-api.alpaca.markets"
 
+
 # Connect to Alpaca API
 api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version='v2')
 
+
 # Function to fetch live data
-def fetch_live_data(ticker, period='5d', interval='1m'):
+def fetch_live_data(ticker, period='5d', interval='15m'):
     data = yf.download(ticker, period=period, interval=interval)
     return data
 
+
+# Function to fetch buying power
+def get_buying_power():
+    account = api.get_account()
+    return float(account.buying_power)
+
+
 # Function to make a trade
-def trade(signal, ticker):
-    if signal == 1:
+def trade(signal, ticker, qty=1):
+    buying_power = get_buying_power()
+    last_price = float(api.get_latest_trade(ticker).price)
+
+    if signal == 1 and (buying_power >= (qty * last_price)):  # Only buy if there's enough buying power
         print(f"Buying {ticker}")
         api.submit_order(
             symbol=ticker,
-            qty=1,  # Modify the quantity as needed
+            qty=qty,  # Modify the quantity as needed
             side='buy',
             type='market',
             time_in_force='gtc'
@@ -139,11 +151,15 @@ def trade(signal, ticker):
         print(f"Selling {ticker}")
         api.submit_order(
             symbol=ticker,
-            qty=1,
+            qty=qty,
             side='sell',
             type='market',
             time_in_force='gtc'
         )
+    else:
+        print(f"Not enough buying power to buy {ticker}")
+
+
 
 # Predict and execute trade
 def predict_and_trade(ticker):
@@ -185,4 +201,4 @@ ticker = "TSLA"
 
 while True:
     predict_and_trade(ticker)
-    time.sleep(60)  # Wait 1 minute before checking again
+    time.sleep(60*15)  # Wait 15 minute before checking again
