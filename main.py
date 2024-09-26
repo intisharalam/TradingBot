@@ -11,6 +11,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
 import alpaca_trade_api as tradeapi
+import backtrader as bt
 import warnings
 
 # Initialize warnings
@@ -19,7 +20,7 @@ plt.style.use('seaborn-v0_8-darkgrid')
 
 # Fetch historical data (OHLC and Volume)
 ticker = "TSLA"
-data = yf.download(ticker, start='2014-01-01', end='2024-01-01', interval='1d')
+data = yf.download(ticker, period='1mo', interval='15m')
 
 # Prepare the DataFrame
 df = data.copy()
@@ -46,7 +47,7 @@ y = np.where(df['Close'].shift(-1) > df['Close'], 1, 0)
 
 
 # Split the data into training and testing sets
-split_percentage = 0.8
+split_percentage = 0.4
 split = int(split_percentage * len(df))
 X_train, X_test = X[:split], X[split:]
 y_train, y_test = y[:split], y[split:]
@@ -94,7 +95,7 @@ print(f"Best Model: {best_model_name} with Accuracy: {accuracies[best_model_name
 
 
 
-
+import logging
 import alpaca_trade_api as tradeapi
 import yfinance as yf
 import numpy as np
@@ -103,46 +104,66 @@ import talib as ta
 import time
 from sklearn.preprocessing import StandardScaler
 
-# Alpaca API Keys
-API_KEY = "PKYE6V5P5MYF0BXJDUHX"
-SECRET_KEY = "U2hIsIa9FNkg53dYlOS9QthS8ritojCRvarAEqW9"
-BASE_URL = "https://paper-api.alpaca.markets"
+# Setup logging
+logging.basicConfig(filename='trading_log.log', level=logging.INFO,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Alpaca API Keys
+API_KEY = "PKSJIADPZFG55Y3EKDWR"
+SECRET_KEY = "fh3pwRtnuzwBhTbOkG2XQEvrbkOhgWzIga75SBnH"
+BASE_URL = "https://paper-api.alpaca.markets"
 
 # Connect to Alpaca API
 api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version='v2')
 
+# Fetch live data for 15-minute intervals
+def fetch_live_data(ticker, period='5d', interval='15m'):
+    try:
+        data = yf.download(ticker, period=period, interval=interval)
+        return data
+    except Exception as e:
+        logging.error(f"Error fetching live data for {ticker}: {e}")
+        return None
 
-# Function to fetch live data
-def fetch_live_data(ticker, period='5d', interval='1m'):
-    data = yf.download(ticker, period=period, interval=interval)
-    return data
-
-
-# Function to fetch buying power
+# Fetch buying power
 def get_buying_power():
-    account = api.get_account()
-    return float(account.buying_power)
+    try:
+        account = api.get_account()
+        return float(account.buying_power)
+    except tradeapi.rest.APIError as e:
+        logging.error(f"API error fetching buying power: {e}")
+        return 0  # Returning 0 in case of an error so no trades are made
+    except Exception as e:
+        logging.error(f"Unexpected error fetching buying power: {e}")
+        return 0
 
+# Get current position in stock
+def get_current_position(ticker):
+    try:
+        position = api.get_position(ticker)
+        return int(position.qty)
+    except tradeapi.rest.APIError as e:
+        logging.info(f"No position found for {ticker}. Returning 0. Error: {e}")
+        return 0  # No position found
+    except Exception as e:
+        logging.error(f"Error fetching position for {ticker}: {e}")
+        return 0
 
-# Function to make a trade
+# Trade based on the signal
 def trade(signal, ticker, max_investment=500):
     try:
+        # Get buying power and latest price
         buying_power = get_buying_power()
-        last_price = float(api.get_latest_trade(ticker).price)
-
-        # Ensure the last price is valid
-        if last_price <= 0:
-            print(f"Invalid last price for {ticker}: {last_price}. Cannot place an order.")
-            return
-
-        # Calculate maximum quantity based on max investment
-        qty = int(max_investment / last_price)  # Integer division to get whole shares
-
-        if signal == 1:  # Buy signal
-            # Check if there is enough buying power and qty is greater than 0
-            if buying_power >= (qty * last_price) and qty > 0:
-                print(f"Buying {qty} shares of {ticker} for ${last_price * qty:.2f}")
+        last_price = float(api.get_last_trade(ticker).price)
+        
+        # Calculate quantity to buy/sell
+        qty = int(max_investment / last_price)
+        current_position = get_current_position(ticker)
+        
+        # Buy signal
+        if signal == 1 and qty > 0:
+            if buying_power >= (qty * last_price):
+                logging.info(f"Buying {qty} shares of {ticker} at ${last_price}")
                 api.submit_order(
                     symbol=ticker,
                     qty=qty,
@@ -151,41 +172,43 @@ def trade(signal, ticker, max_investment=500):
                     time_in_force='gtc'
                 )
             else:
-                print(f"Not enough buying power to buy {qty} shares of {ticker}. Current buying power: ${buying_power:.2f}")
-
-        elif signal == 0:  # Sell signal
-            if qty > 0:
-                print(f"Selling {qty} shares of {ticker}")
-                api.submit_order(
-                    symbol=ticker,
-                    qty=qty,
-                    side='sell',
-                    type='market',
-                    time_in_force='gtc'
-                )
-            else:
-                print(f"No shares to sell for {ticker}. Quantity: {qty}")
-
+                logging.warning(f"Not enough buying power to buy {qty} shares of {ticker}. Available: ${buying_power:.2f}")
+        
+        # Sell signal
+        elif signal == 0 and current_position > 0:
+            logging.info(f"Selling {current_position} shares of {ticker}")
+            api.submit_order(
+                symbol=ticker,
+                qty=current_position,
+                side='sell',
+                type='market',
+                time_in_force='gtc'
+            )
         else:
-            print(f"Invalid signal for {ticker}.")
+            logging.info(f"No valid trade action for signal {signal} on {ticker}.")
     
+    except tradeapi.rest.APIError as e:
+        logging.error(f"Alpaca API error during trade execution for {ticker}: {e}")
     except Exception as e:
-        print(f"An error occurred while processing the trade for {ticker}: {e}")
+        logging.error(f"Unexpected error during trade for {ticker}: {e}")
 
-# Predict and execute trade
+# Predict and trade
 def predict_and_trade(ticker):
     try:
         # Fetch live data
-        df = fetch_live_data(ticker)
+        df = fetch_live_data(ticker, period='5d', interval='15m')
+        if df is None or df.empty:
+            logging.error(f"No data available for {ticker}. Skipping trade.")
+            return
         
-        # Prepare the DataFrame (same as you did before)
+        # Prepare features
         df['Open-Close'] = (df["Open"] - df['Close']).shift(-1)
         df['Close-High'] = (df["Close"] - df['High']).shift(-1)
         df['Close-Low'] = (df["Close"] - df['Low']).shift(-1)
         df['High-Low'] = df['High'] - df['Low']
         df['Mid'] = (df['High'] + df['Low']) / 2
         
-        # Calculate technical indicators (same as before)
+        # Calculate technical indicators
         df['rsi'] = ta.RSI(df['Close'].values, timeperiod=14)
         df['adx'] = ta.ADX(df['High'].values, df['Low'].values, df['Open'].values, timeperiod=50)
         df['NATR'] = ta.NATR(df['High'], df['Low'], df['Close'], timeperiod=50)
@@ -196,24 +219,35 @@ def predict_and_trade(ticker):
         
         df.dropna(inplace=True)
 
-        # Feature set
+        # Prepare the feature set for prediction
         X_live = df[['sma','pct_change','pct_change5','rsi', 'adx', 'corr', 'Volume', 'Open-Close', 'Close-Low', 'Close-High', 'High-Low','Mid']].copy()
 
-        # Scale the features using the same scaler
+        # Ensure the scaler and model are loaded
+        if 'scaler' not in globals() or 'best_model' not in globals():
+            logging.error("Scaler or model not found. Ensure the model is loaded correctly.")
+            return
+        
+        # Scale the features
         X_live_scaled = scaler.transform(X_live)
 
-        # Use the trained model to predict
+        # Predict the signal
         predicted_signal = best_model.predict(X_live_scaled[-1].reshape(1, -1))[0]
-
+        
         # Execute trade based on prediction
         trade(predicted_signal, ticker)
 
     except Exception as e:
-        print(f"An error occurred during trading for {ticker}: {e}")
+        logging.error(f"Error during prediction or trade execution for {ticker}: {e}")
 
-# Set the ticker symbol
-ticker = "TSLA"
+# Main strategy loop running every 15 minutes
+def run_strategy():
+    ticker = "TSLA"
+    while True:
+        try:
+            predict_and_trade(ticker)
+            time.sleep(15 * 60)  # Wait 15 minutes before checking again
+        except Exception as e:
+            logging.error(f"Critical error in strategy loop: {e}")
 
-while True:
-    predict_and_trade(ticker)
-    time.sleep(60)  # Wait 1 minute before checking again
+# Execute the strategy
+run_strategy()
