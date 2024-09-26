@@ -27,7 +27,9 @@ This project is an implementation of a machine learning pipeline to predict stoc
 
 The chart below shows the comparison between the cumulative market returns and the strategy returns based on the best-performing machine learning model.
 
-![Market vs Strategy Returns](https://github.com/intisharalam/TradingBot/blob/main/Cummulative_Returns.png)
+<p align="center">
+  <img src="https://github.com/intisharalam/TradingBot/blob/main/Cummulative_Returns.png" alt="Market vs Strategy Returns" width="600"/>
+</p>
 
 ### Plot 2: Backtest Results
 
