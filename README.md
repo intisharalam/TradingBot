@@ -35,7 +35,9 @@ The chart below shows the comparison between the cumulative market returns and t
 
 Below is a plot from the Backtrader backtest showing the performance of the strategy over the test period.
 
-![Backtest Results](https://github.com/intisharalam/TradingBot/blob/main/Backtesting_Results.png)
+<p align="center">
+  <img src="https://github.com/intisharalam/TradingBot/blob/main/Backtesting_Results.png" alt="Backtest Results" width="600"/>
+</p>
 
 ## Installation
 
